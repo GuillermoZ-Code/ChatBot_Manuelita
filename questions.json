@@ -1,0 +1,84 @@
+{
+  "preguntas": [
+  {
+    "categoria": "Operaciones y Modelo de Negocio",
+    "texto": "¿Qué es el Grupo Manuelita y a qué sector económico pertenece?"
+  },
+  {
+    "categoria": "Operaciones y Modelo de Negocio",
+    "texto": "¿Cuál es el propósito central o la misión que define a la compañía?"
+  },
+  {
+    "categoria": "Operaciones y Modelo de Negocio",
+    "texto": "¿Cuáles son las principales divisiones o unidades de negocio que maneja el Grupo Manuelita?"
+  },
+  {
+    "categoria": "Operaciones y Modelo de Negocio",
+    "texto": "¿Qué tipo de productos ofrece la empresa tanto para el consumo en hogares como para la industria?"
+  },
+  {
+    "categoria": "Operaciones y Modelo de Negocio",
+    "texto": "¿De qué manera participa la empresa en el mercado de las energías renovables y los biocombustibles?"
+  },
+  {
+    "categoria": "Operaciones y Modelo de Negocio",
+    "texto": "¿A qué tipo de industrias, sectores o mercados están dirigidos los productos de la compañía?"
+  },
+  {
+    "categoria": "Historia, Presencia y Gobernanza",
+    "texto": "¿Cuántos años de trayectoria o historia tiene la empresa en el mercado?"
+  },
+  {
+    "categoria": "Historia, Presencia y Gobernanza",
+    "texto": "¿Cuáles han sido los hitos o momentos más importantes en la evolución de Manuelita desde su fundación?"
+  },
+  {
+    "categoria": "Historia, Presencia y Gobernanza",
+    "texto": "¿En qué países de América Latina tiene presencia y operaciones la compañía?"
+  },
+  {
+    "categoria": "Historia, Presencia y Gobernanza",
+    "texto": "¿Cuáles son los valores y principios éticos que rigen el comportamiento de la empresa?"
+  },
+  {
+    "categoria": "Historia, Presencia y Gobernanza",
+    "texto": "¿Cómo está conformada la estructura directiva y cómo se toman las decisiones corporativas en la organización?"
+  },
+  {
+    "categoria": "Historia, Presencia y Gobernanza",
+    "texto": "¿Dónde puedo consultar los informes oficiales, resultados financieros o reportes de sostenibilidad de la empresa?"
+  },
+  {
+    "categoria": "Sostenibilidad y Responsabilidad Social (ESG)",
+    "texto": "¿Qué significa la sostenibilidad para Manuelita y cómo la aplican en sus cultivos?"
+  },
+  {
+    "categoria": "Sostenibilidad y Responsabilidad Social (ESG)",
+    "texto": "¿Cuáles son los compromisos principales de la empresa con la protección del medio ambiente?"
+  },
+  {
+    "categoria": "Sostenibilidad y Responsabilidad Social (ESG)",
+    "texto": "¿Qué medidas específicas toma la empresa para reducir su huella de carbono y optimizar el uso del agua?"
+  },
+  {
+    "categoria": "Sostenibilidad y Responsabilidad Social (ESG)",
+    "texto": "¿Cómo apoya Manuelita el progreso y bienestar de las comunidades que la rodean?"
+  },
+  {
+    "categoria": "Sostenibilidad y Responsabilidad Social (ESG)",
+    "texto": "¿De qué manera contribuye el grupo al desarrollo económico de las regiones y países donde opera?"
+  },
+  {
+    "categoria": "Talento, Cultura y Visión a Futuro",
+    "texto": "¿Por qué Manuelita es un buen lugar para trabajar y qué tipo de talento buscan?"
+  },
+  {
+    "categoria": "Talento, Cultura y Visión a Futuro",
+    "texto": "¿Cómo describirías la cultura organizacional y el ambiente de trabajo dentro de la empresa?"
+  },
+  {
+    "categoria": "Talento, Cultura y Visión a Futuro",
+    "texto": "¿Cuáles son los planes de crecimiento, visión a futuro o próximos proyectos del Grupo Manuelita?"
+  }
+]
+}
