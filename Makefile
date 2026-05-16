@@ -2,6 +2,10 @@ limpiar:
 	cls
 	cls
 
+runapp:
+	make limpiar
+	uv run streamlit run app.py
+
 main:
 	make limpiar
 	uv run main.py
@@ -25,3 +29,19 @@ cod4:
 cod5:
 	make limpiar
 	uv run streamlit run mainv5.py
+
+cod6:
+	make limpiar
+	uv run streamlit run mainv6.py
+
+cod7:
+	make limpiar
+	uv run streamlit run mainv7.py
+
+cod8:
+	make limpiar
+	uv run streamlit run mainv8.py
+
+cod9:
+	make limpiar
+	uv run streamlit run mainv9.py
