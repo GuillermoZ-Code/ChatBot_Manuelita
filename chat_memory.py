@@ -2,57 +2,51 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from db import (
     add_message,
     create_chat,
     get_chat,
+    get_user_fact,
     list_messages,
+    load_user_profile,
     rename_chat,
     save_user_fact,
-    get_user_fact,
-    load_user_profile,
 )
 from settings import DEFAULT_CHAT_TITLE_LIMIT, DEFAULT_HISTORY_TURNS
 
 
 class ChatMemoryService:
-    """Gestiona una conversación persistida en SQLite."""
+    """Gestiona una conversación persistida en SQLite y perfil por sesión."""
 
-    def __init__(self, chat_id: int) -> None:
-        """Inicializa el servicio con un chat existente."""
-        self.chat_id = chat_id
+    def __init__(self, chat_id: int, session_id: str) -> None:
+        self.chat_id = int(chat_id)
+        self.session_id = str(session_id).strip()
 
     @staticmethod
     def create_new_chat() -> int:
-        """Crea un chat nuevo con título temporal."""
         return create_chat("Nuevo chat")
 
     def get_messages(self) -> List[Dict[str, Any]]:
-        """Retorna los mensajes persistidos del chat."""
         return list_messages(self.chat_id)
 
     def get_user_profile(self) -> Dict[str, Any]:
-        """Retorna el perfil persistente del usuario."""
-        return load_user_profile()
+        return load_user_profile(self.session_id)
 
     def get_user_fact(self, key: str, default: Any = None) -> Any:
-        """Obtiene un dato persistente del usuario."""
-        return get_user_fact(key, default)
+        return get_user_fact(self.session_id, key, default)
 
     def save_user_fact(self, key: str, value: Any) -> None:
-        """Guarda un dato persistente del usuario."""
-        save_user_fact(key, value)
+        save_user_fact(self.session_id, key, value)
 
     def append_user_message(self, content: str, model_used: str = "") -> None:
-        """Guarda un mensaje del usuario y actualiza el título si aplica."""
         add_message(
             chat_id=self.chat_id,
             role="user",
             content=content,
             model_used=model_used,
-            metadata={"source": "chat"},
+            metadata={"source": "chat", "session_id": self.session_id},
         )
         self._extract_user_facts(content)
         self._ensure_title_from_first_message(content)
@@ -65,7 +59,9 @@ class ChatMemoryService:
         tool_used: str,
         metadata: Dict[str, Any],
     ) -> None:
-        """Guarda un mensaje del asistente con metadatos."""
+        final_metadata = dict(metadata or {})
+        final_metadata["session_id"] = self.session_id
+
         add_message(
             chat_id=self.chat_id,
             role="assistant",
@@ -73,11 +69,10 @@ class ChatMemoryService:
             route_used=route_used,
             model_used=model_used,
             tool_used=tool_used,
-            metadata=metadata,
+            metadata=final_metadata,
         )
 
     def get_recent_history_text(self, limit: int = DEFAULT_HISTORY_TURNS) -> str:
-        """Construye un historial corto para el prompt del agente."""
         messages = self.get_messages()[-limit:]
         if not messages:
             return "Sin historial previo."
@@ -86,30 +81,33 @@ class ChatMemoryService:
         for item in messages:
             role = "Usuario" if item["role"] == "user" else "Asistente"
             lines.append(f"{role}: {item['content']}")
-        return "".join(lines)
+        return "\n".join(lines)
 
     def _ensure_title_from_first_message(self, first_message: str) -> None:
-        """Genera un título automático a partir del primer mensaje útil."""
         chat = get_chat(self.chat_id)
-        if not chat:
-            return
-        if chat["title"] != "Nuevo chat":
+        if not chat or chat["title"] != "Nuevo chat":
             return
 
-        title = first_message.strip().replace("", " ")
+        title = " ".join(first_message.strip().split())
         if not title:
             return
+
         title = title[:DEFAULT_CHAT_TITLE_LIMIT].rstrip()
         rename_chat(self.chat_id, title)
 
     def _extract_user_facts(self, content: str) -> None:
-        """Extrae datos personales simples del usuario para memoria global."""
         lowered = content.lower().strip()
         markers = ["me llamo ", "mi nombre es ", "soy "]
+
         for marker in markers:
             if marker in lowered:
-                raw = content.lower().split(marker, 1)[1].strip()
-                name = raw.split()[0].strip().capitalize()
-                if name:
-                    self.save_user_fact("name", name)
-                break
+                start = lowered.find(marker)
+                extracted = content[start + len(marker):].strip()
+                if not extracted:
+                    return
+
+                token = extracted.split()[0].strip(".,;:!?\"'()[]{}")
+                if token:
+                    normalized = token[:1].upper() + token[1:].lower()
+                    self.save_user_fact("name", normalized)
+                    return

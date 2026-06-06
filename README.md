@@ -1,162 +1,228 @@
-# Taller 2 — Asistente Virtual Manuelita S.A.
+# Agente Conversacional Manuelita S.A.
 
-Este proyecto implementa un asistente conversacional corporativo para Manuelita S.A. usando Streamlit, LangChain, SQLite, RAG y una base de datos estructurada. El sistema responde preguntas del usuario combinando memoria conversacional, recuperación documental y datos deterministas.
+Este proyecto implementa un asistente conversacional corporativo para Manuelita S.A. orientado a responder consultas institucionales a través de WhatsApp y una interfaz de apoyo en Streamlit. La solución combina memoria conversacional persistente, recuperación documental con RAG, datos estructurados para respuestas deterministas y una arquitectura modular basada en FastAPI, LangChain/LangGraph, ChromaDB y SQLite.
 
-## Arquitectura
+## Propósito
 
-La solución se organiza en cinco capas:
+El objetivo del sistema es ofrecer respuestas claras, útiles y controladas sobre información institucional de Manuelita S.A., reduciendo errores y alucinaciones mediante el uso combinado de varias capas de conocimiento. El agente no depende únicamente de un modelo generativo: también consulta memoria, conocimiento documental y fuentes estructuradas antes de responder.
 
-1. **Interfaz web**: `app.py` renderiza el chat, el panel lateral, la configuración y las preguntas sugeridas.
-2. **Orquestación del agente**: `agent_service.py` decide si una consulta se responde por memoria, por dato estructurado o por RAG.
-3. **Persistencia**: `db.py` y `chat_memory.py` gestionan chats, mensajes, memoria persistente y configuración en SQLite.
-4. **Recuperación de conocimiento**: `rag_client.py` accede a Chroma para recuperar fragmentos relevantes del corpus documental.
-5. **Datos estructurados y herramientas**: `structured_tool.py`, `tools.py` y `structured_data.json` resuelven consultas cerradas y ayudan al enrutamiento.
+## Alcance del sistema
 
-## Flujo de respuesta
+El agente se diseñó como una solución funcional para operación local y académica, con capacidad de integrarse al canal de WhatsApp mediante un servidor puente y una API interna del agente. Además, la arquitectura deja abierta la posibilidad de evolucionar hacia escenarios más robustos, por ejemplo migrando a PostgreSQL, fortaleciendo autenticación o incorporando monitoreo más avanzado.
 
-1. El usuario envía una pregunta desde la interfaz.
-2. `app.py` guarda el mensaje y llama a `AgentService`.
-3. El agente analiza la consulta y selecciona una ruta:
-   - **Memoria**: usa el historial del chat y el perfil persistente del usuario.
-   - **Dato estructurado**: responde desde `structured_data.json` si existe una coincidencia directa.
-   - **RAG**: recupera fragmentos desde Chroma y construye un prompt con contexto documental.
-4. El modelo genera la respuesta.
-5. La respuesta se guarda en SQLite con metadatos de la ruta usada.
-6. La interfaz muestra el resultado y conserva el historial.
+## Arquitectura general
 
-## Estructura de archivos
+La solución se organiza en cinco capas principales:
 
-### `app.py`
-Punto de entrada principal de la aplicación. Inicializa Streamlit, carga configuración, renderiza la interfaz y coordina la interacción con el agente.
+1. **Canal de entrada y puente de mensajería**: `server.py` conecta WhatsApp con el agente y expone endpoints REST para estado, chat, envío y reinicio de sesión.
+2. **API interna del agente**: `agent_api.py` recibe la consulta, resuelve la sesión por número telefónico, carga configuración y delega la respuesta al servicio del agente.
+3. **Orquestación inteligente**: `agent_service.py` analiza la consulta y decide si responder por memoria, dato estructurado o recuperación RAG.
+4. **Persistencia**: `db.py` y `chat_memory.py` almacenan conversaciones, configuraciones y perfil de usuario en SQLite.
+5. **Recuperación y conocimiento**: `rag_client.py`, `structured_tool.py`, `tools.py` y `structured_data.json` permiten responder con base en documentos y datos institucionales controlados.
+
+## Flujo de una consulta
+
+El flujo operativo puede resumirse así:
+
+1. El usuario envía un mensaje por WhatsApp.
+2. `server.py` recibe el mensaje y lo traduce a una solicitud HTTP interna hacia `agent_api.py`.
+3. `agent_api.py` identifica al usuario por número telefónico, asigna o recupera su `chat_id` persistente y crea la sesión conversacional correspondiente.
+4. `agent_service.py` analiza la pregunta y decide si debe resolverse por memoria, por datos estructurados o por RAG.
+5. El modelo LLM genera la respuesta usando el contexto disponible.
+6. La interacción queda registrada en SQLite para continuidad, trazabilidad y reutilización posterior.
+7. `server.py` devuelve la respuesta al usuario por el canal de WhatsApp.
+
+## Estrategia de respuesta
+
+El sistema no responde todas las preguntas del mismo modo. En su lugar, aplica una lógica híbrida:
+
+- **Memoria conversacional**: útil para recordar información compartida por el usuario, como su nombre o contexto reciente.
+- **Datos estructurados**: se usan para responder consultas fijas, por ejemplo contacto, sedes, horarios o información operativa controlada.
+- **RAG institucional**: se activa cuando la consulta requiere contenido documental más amplio, como historia, trayectoria, contexto corporativo o temas institucionales no triviales.
+
+Esta separación mejora la confiabilidad del sistema y evita que preguntas simples dependan innecesariamente del modelo generativo.
+
+## Componentes principales
+
+### `server.py`
+Puente entre WhatsApp y el agente. Gestiona la conexión del canal, recibe mensajes entrantes, envía respuestas y expone endpoints REST como `/status`, `/chat`, `/send` y `/reset`.
+
+### `agent_api.py`
+Puerta HTTP del agente. Recibe solicitudes desde el puente, resuelve la sesión por número telefónico, selecciona el modelo activo y ejecuta el flujo de respuesta del agente.
+
+### `agent.py`
+Cliente HTTP interno que conecta `server.py` con `agent_api.py` y encapsula la invocación al agente remoto/local.
 
 ### `agent_service.py`
-Capa principal de decisión. Evalúa la consulta, selecciona la mejor ruta de respuesta y construye los mensajes para el modelo.
+Capa principal de decisión. Evalúa la consulta y selecciona la mejor ruta de respuesta entre memoria, dato estructurado o RAG.
 
 ### `chat_memory.py`
-Servicio de memoria conversacional. Recupera mensajes del chat actual, guarda interacciones y extrae hechos simples del usuario para memoria persistente.
+Servicio de memoria conversacional. Guarda y recupera historial, extrae datos básicos del usuario y mantiene continuidad por sesión o número telefónico.
 
 ### `db.py`
-Persistencia SQLite. Administra tablas de chats, mensajes, perfil de usuario y configuraciones generales.
+Capa de persistencia basada en SQLite. Administra chats, mensajes, configuraciones y asociaciones entre número telefónico y sesión.
 
 ### `rag_client.py`
-Cliente de acceso a la base vectorial Chroma. Construye embeddings, realiza búsquedas por similitud y serializa el contexto recuperado.
+Cliente de acceso al vector store. Consulta ChromaDB para recuperar fragmentos relevantes del corpus documental institucional.
 
 ### `structured_tool.py`
-Carga y consulta la base estructurada del sistema. Útil para preguntas fijas o de respuesta directa.
+Resuelve consultas deterministas desde la base estructurada. Es especialmente útil para datos operativos o institucionales fijos.
 
 ### `tools.py`
-Centraliza las herramientas disponibles para el agente, principalmente RAG y datos estructurados.
+Centraliza las herramientas disponibles para el agente, incluyendo recuperación RAG y acceso a datos estructurados.
 
 ### `llm_factory.py`
-Fábrica de modelos. Crea la instancia del LLM según la configuración seleccionada.
+Construye instancias de modelos locales y API según la configuración disponible. Soporta proveedores como Ollama, Gemini y GPT-4o mini.
 
 ### `settings.py`
-Archivo de configuración general. Define rutas, parámetros por defecto, prompts base y límites de la aplicación.
+Archivo de configuración central. Define rutas, parámetros por defecto, límites, modelo por defecto y prompt base del sistema.
 
-### `env_utils.py`
-Carga variables de entorno desde `.env`.
-
-### `langsmith_config.py`
-Activa la trazabilidad con LangSmith cuando se dispone de API key.
+### `app.py`
+Aplicación base en Streamlit. Proporciona chat, historial, configuración técnica y una interfaz administrativa inicial del asistente.
 
 ### `ui_components.py`
-Contiene estilos visuales personalizados, encabezado principal y elementos reutilizables de interfaz.
+Contiene estilos y fragmentos de interfaz reutilizables para mantener una apariencia visual consistente.
 
-### `questions.json`
-Archivo de preguntas sugeridas agrupadas por categorías para guiar al usuario.
-
-### `structured_data.json`
-Base estructurada con información fija de negocio para consultas deterministas.
+### `ingesta.py`
+Script de preparación del RAG. Procesa el corpus documental, aplica particionado y genera la base vectorial persistente en ChromaDB.
 
 ### `context/`
-Carpeta con documentos Markdown usados como base documental para el RAG.
+Carpeta con los documentos fuente usados para construir el corpus institucional del agente.
+
+### `structured_data.json`
+Base estructurada con información fija de negocio y contacto para respuestas controladas.
 
 ### `chroma_db_manuelita_local/`
-Directorio generado automáticamente que almacena la base vectorial persistente creada a partir del corpus documental.
+Directorio donde se persiste la base vectorial generada a partir del corpus institucional.
 
-### `.env.example`
-Plantilla de variables de entorno requeridas por la aplicación.
+## Stack tecnológico
 
-### `.gitignore`
-Excluye archivos locales, credenciales, base vectorial generada y otros artefactos que no deben versionarse.
+| Componente | Uso principal |
+|---|---|
+| FastAPI | API del agente y puente REST |
+| Streamlit | Interfaz local de operación y prueba |
+| LangChain / LangGraph | Orquestación del agente y uso de herramientas |
+| ChromaDB | Recuperación semántica del conocimiento institucional |
+| HuggingFace Embeddings | Embeddings multilingües para el RAG |
+| SQLite | Persistencia conversacional y configuración |
+| WhatsApp vía código | Canal conversacional de entrada y salida |
+| Ollama / Gemini / GPT-4o mini | Modelos LLM locales y por API |
 
-### `README.md`
-Documentación principal del proyecto.
+## Funcionalidades implementadas
 
-## Dependencias
+- Integración con WhatsApp mediante una arquitectura code-centric.
+- API interna del agente sobre FastAPI.
+- Persistencia de conversaciones y configuración en SQLite.
+- Soporte para memoria conversacional por usuario o número telefónico.
+- Respuestas deterministas desde datos estructurados.
+- Respuestas documentales usando RAG sobre ChromaDB.
+- Selección de modelos locales y por API.
+- Interfaz base en Streamlit para chat y configuración.
+- Trazabilidad opcional con LangSmith cuando se dispone de credenciales.
 
-El proyecto usa, entre otras, las siguientes dependencias:
+## Decisiones de diseño relevantes
 
-- `streamlit`
-- `langchain`
-- `langchain-community`
-- `langchain-google-genai` o el proveedor definido en el proyecto
-- `chromadb`
-- `sentence-transformers`
-- `sqlite3` (incluida en Python)
-- `python-dotenv`
-- `pydantic`
-- `requests`
+### Arquitectura híbrida
+Se eligió una solución híbrida porque un agente empresarial no debe depender solo de generación libre. La combinación de memoria, datos estructurados y RAG permite mayor control, mejor trazabilidad y respuestas más confiables.
 
-> La lista exacta puede variar según tu `pyproject.toml` o `requirements.txt`.
+### Persistencia con SQLite
+La implementación actual usa SQLite como mecanismo principal de persistencia por simplicidad operativa y viabilidad en entorno local. Esta decisión deja una base funcional que puede migrarse más adelante a PostgreSQL en entornos más exigentes.
+
+### Integración WhatsApp sin N8N
+Se optó por una integración code-centric en lugar de una capa intermedia con N8N. Esto da más control técnico sobre el flujo, simplifica la trazabilidad y reduce dependencias externas.
+
+### Separación entre memoria y razonamiento
+La memoria persistente del usuario se mantiene separada del estado interno del razonamiento del agente. Esta decisión evita contaminación de contexto entre turnos y mejora la estabilidad de las respuestas.
 
 ## Requisitos previos
 
-Antes de ejecutar el proyecto verifica:
+Antes de ejecutar el proyecto, verifica lo siguiente:
 
 - Tener Python instalado.
-- Crear y activar un entorno virtual.
-- Instalar dependencias del proyecto.
-- Configurar el archivo `.env`.
-- Contar con la base vectorial de Chroma construida.
+- Contar con un entorno virtual configurado.
+- Instalar las dependencias del proyecto.
+- Configurar correctamente el archivo `.env`.
+- Disponer del corpus documental para construir o reutilizar la base vectorial.
 - Tener un archivo `structured_data.json` válido.
+- Si usarás modelos API, contar con las claves correspondientes.
+- Si usarás modelos locales, tener Ollama instalado y con modelos disponibles.
 
 ## Configuración del entorno
 
 1. Copia `.env.example` a `.env`.
-2. Completa las variables necesarias, por ejemplo:
+2. Define las credenciales necesarias para el proveedor LLM que vayas a usar.
+3. Si deseas trazabilidad, configura LangSmith en el entorno.
+4. Verifica que la carpeta `context/` exista y contenga los documentos institucionales fuente.
+5. Si cambias el corpus, reconstruye la base vectorial antes de iniciar el sistema.
+
+Ejemplo de variables de entorno:
 
 ```env
-LANGSMITH_API_KEY=tu_api_key_de_langsmith
+LANGSMITH_API_KEY=tu_api_key
 LANGSMITH_TRACING=true
-LANGSMITH_PROJECT=taller_1_manuelita
+LANGSMITH_PROJECT=agente_manuelita
+GEMINI_API_KEY=tu_api_key_gemini
+OPENAI_API_KEY=tu_api_key_openai
 ```
 
-3. Configura las claves del proveedor LLM si aplica.
-4. Verifica que la carpeta `context/` exista y contenga los documentos fuente.
+## Ejecución del proyecto
 
-## Cómo ejecutar el proyecto
+### Interfaz Streamlit
 
-### Opción 1: ejecución directa con Streamlit
+Para ejecutar la interfaz base:
 
 ```bash
 streamlit run app.py
 ```
 
-### Opción 2: reconstruir la base RAG antes de ejecutar
+### API del agente
 
-Si cambias los documentos de `context/`, vuelve a generar la base vectorial antes de abrir la app.
+Para iniciar la API del agente:
 
-## Funcionalidades principales
+```bash
+uv run python agent_api.py
+```
 
-- Chat conversacional persistente.
-- Memoria de usuario entre conversaciones.
-- Respuestas con conocimiento documental mediante RAG.
-- Respuestas rápidas desde datos estructurados.
-- Preguntas sugeridas por categoría.
-- Configuración del modelo desde la interfaz.
-- Trazabilidad opcional con LangSmith.
-- Estilo visual corporativo basado en Manuelita S.A.
+### Servidor puente de WhatsApp
 
-## Manejo de errores
+Para iniciar el servidor puente:
 
-La aplicación debe contemplar errores como:
+```bash
+uv run python server.py
+```
 
-- Falta de API key.
-- Cuotas agotadas del modelo.
-- Base vectorial no encontrada.
-- Fallos en el corpus o en el archivo estructurado.
+### Reconstrucción del RAG
 
-## Notas finales
+Si modificas los documentos de `context/`, reconstruye la base vectorial antes de volver a usar el sistema:
 
-Este taller combina una interfaz web sencilla con una arquitectura modular para construir un asistente corporativo útil, trazable y extensible. La separación entre memoria, RAG y datos estructurados permite responder mejor tanto consultas personales como preguntas de negocio sobre Manuelita S.A.
+```bash
+uv run python ingesta.py
+```
+
+## Endpoints principales
+
+| Endpoint | Servicio | Propósito |
+|---|---|---|
+| `/chat` | `agent_api.py` | Procesar consultas del agente por número o sesión |
+| `/status` | `agent_api.py` | Verificar estado del agente y modelos disponibles |
+| `/status` | `server.py` | Confirmar si WhatsApp está conectado |
+| `/send` | `server.py` | Enviar mensajes manualmente por el puente |
+| `/reset` | `server.py` | Reiniciar sesión o contexto operativo |
+
+## Limitaciones actuales
+
+- La persistencia productiva robusta con PostgreSQL no está implementada todavía; la solución actual usa SQLite.
+- El análisis avanzado de conversaciones, por ejemplo con t-SNE, aparece como posibilidad futura y no como componente actual.
+- El sistema puede fortalecerse con autenticación, rate limiting y monitoreo más robusto.
+
+## Trabajo futuro recomendado
+
+- Migrar de SQLite a PostgreSQL para escenarios multiusuario o distribuidos.
+- Añadir autenticación y control de acceso a la API del agente.
+- Incorporar monitoreo y trazabilidad más completa en producción.
+- Fortalecer seguridad, validaciones de entrada y rate limiting.
+- Desarrollar analítica posterior sobre conversaciones y uso del sistema.
+
+## Valor del proyecto
+
+El valor principal de este agente no está solo en responder mensajes, sino en haber sido construido con una lógica técnica defendible, modular y extensible. La solución integra fuentes controladas, separa responsabilidades, documenta sus límites y deja una base realista para evolucionar hacia un asistente corporativo más robusto.

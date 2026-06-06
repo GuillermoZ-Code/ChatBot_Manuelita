@@ -12,16 +12,15 @@ from settings import DB_PATH, DEFAULT_SETTINGS
 
 
 def utc_now() -> str:
-    """Retorna la marca de tiempo UTC en formato ISO."""
     return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
 
 @contextmanager
 def get_connection() -> Iterator[sqlite3.Connection]:
-    """Abre una conexión SQLite con row factory habilitado."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(DB_PATH)
+    connection = sqlite3.connect(DB_PATH, check_same_thread=False)
     connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
     try:
         yield connection
         connection.commit()
@@ -30,7 +29,6 @@ def get_connection() -> Iterator[sqlite3.Connection]:
 
 
 def initialize_database() -> None:
-    """Crea las tablas necesarias si aún no existen."""
     with get_connection() as connection:
         connection.executescript(
             """
@@ -56,9 +54,11 @@ def initialize_database() -> None:
             );
 
             CREATE TABLE IF NOT EXISTS user_profile (
-                key TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                key TEXT NOT NULL,
                 value_json TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (session_id, key)
             );
 
             CREATE TABLE IF NOT EXISTS app_settings (
@@ -74,7 +74,6 @@ def initialize_database() -> None:
 
 
 def create_chat(title: str = "Nuevo chat") -> int:
-    """Crea un nuevo chat persistente y retorna su identificador."""
     now = utc_now()
     with get_connection() as connection:
         cursor = connection.execute(
@@ -88,7 +87,6 @@ def create_chat(title: str = "Nuevo chat") -> int:
 
 
 def list_chats() -> List[Dict[str, Any]]:
-    """Lista los chats disponibles ordenados por actualización descendente."""
     with get_connection() as connection:
         rows = connection.execute(
             """
@@ -102,7 +100,6 @@ def list_chats() -> List[Dict[str, Any]]:
 
 
 def get_chat(chat_id: int) -> Optional[Dict[str, Any]]:
-    """Obtiene un chat por identificador."""
     with get_connection() as connection:
         row = connection.execute(
             "SELECT id, title, created_at, updated_at FROM chats WHERE id = ?",
@@ -112,7 +109,6 @@ def get_chat(chat_id: int) -> Optional[Dict[str, Any]]:
 
 
 def rename_chat(chat_id: int, new_title: str) -> None:
-    """Actualiza el título de una conversación existente."""
     with get_connection() as connection:
         connection.execute(
             "UPDATE chats SET title = ?, updated_at = ? WHERE id = ?",
@@ -121,14 +117,12 @@ def rename_chat(chat_id: int, new_title: str) -> None:
 
 
 def delete_chat(chat_id: int) -> None:
-    """Elimina un chat y todos sus mensajes asociados."""
     with get_connection() as connection:
         connection.execute("DELETE FROM messages WHERE chat_id = ?", (chat_id,))
         connection.execute("DELETE FROM chats WHERE id = ?", (chat_id,))
 
 
 def clear_all_data() -> None:
-    """Borra conversaciones, perfil de usuario y configuración."""
     with get_connection() as connection:
         connection.execute("DELETE FROM messages")
         connection.execute("DELETE FROM chats")
@@ -148,9 +142,9 @@ def add_message(
     tool_used: str = "",
     metadata: Optional[Dict[str, Any]] = None,
 ) -> int:
-    """Guarda un mensaje dentro de una conversación."""
     created_at = utc_now()
     metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
+
     with get_connection() as connection:
         cursor = connection.execute(
             """
@@ -179,7 +173,6 @@ def add_message(
 
 
 def list_messages(chat_id: int) -> List[Dict[str, Any]]:
-    """Lista mensajes de una conversación en orden cronológico."""
     with get_connection() as connection:
         rows = connection.execute(
             """
@@ -201,16 +194,18 @@ def list_messages(chat_id: int) -> List[Dict[str, Any]]:
 
 
 def save_setting(key: str, value: Any, overwrite: bool = True) -> None:
-    """Guarda un ajuste de aplicación como JSON."""
     payload = json.dumps(value, ensure_ascii=False)
     now = utc_now()
+
     with get_connection() as connection:
         exists = connection.execute(
             "SELECT 1 FROM app_settings WHERE key = ?",
             (key,),
         ).fetchone()
+
         if exists and not overwrite:
             return
+
         connection.execute(
             """
             INSERT INTO app_settings (key, value_json, updated_at)
@@ -223,7 +218,6 @@ def save_setting(key: str, value: Any, overwrite: bool = True) -> None:
 
 
 def get_setting(key: str, default: Any = None) -> Any:
-    """Recupera un ajuste persistido o retorna el valor por defecto."""
     with get_connection() as connection:
         row = connection.execute(
             "SELECT value_json FROM app_settings WHERE key = ?",
@@ -235,47 +229,57 @@ def get_setting(key: str, default: Any = None) -> Any:
 
 
 def load_all_settings() -> Dict[str, Any]:
-    """Carga todos los ajustes persistidos."""
     with get_connection() as connection:
         rows = connection.execute("SELECT key, value_json FROM app_settings").fetchall()
+
     settings = DEFAULT_SETTINGS.copy()
     for row in rows:
         settings[row["key"]] = json.loads(row["value_json"])
     return settings
 
 
-def save_user_fact(key: str, value: Any) -> None:
-    """Guarda un hecho persistente del usuario."""
+def save_user_fact(session_id: str, key: str, value: Any) -> None:
     now = utc_now()
     payload = json.dumps(value, ensure_ascii=False)
+
     with get_connection() as connection:
         connection.execute(
             """
-            INSERT INTO user_profile (key, value_json, updated_at)
-            VALUES (?, ?, ?)
-            ON CONFLICT(key)
+            INSERT INTO user_profile (session_id, key, value_json, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(session_id, key)
             DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at
             """,
-            (key, payload, now),
+            (session_id, key, payload, now),
         )
 
 
-def get_user_fact(key: str, default: Any = None) -> Any:
-    """Recupera un hecho persistente del usuario."""
+def get_user_fact(session_id: str, key: str, default: Any = None) -> Any:
     with get_connection() as connection:
         row = connection.execute(
-            "SELECT value_json FROM user_profile WHERE key = ?",
-            (key,),
+            """
+            SELECT value_json
+            FROM user_profile
+            WHERE session_id = ? AND key = ?
+            """,
+            (session_id, key),
         ).fetchone()
     if not row:
         return default
     return json.loads(row["value_json"])
 
 
-def load_user_profile() -> Dict[str, Any]:
-    """Carga todo el perfil persistente del usuario."""
+def load_user_profile(session_id: str) -> Dict[str, Any]:
     with get_connection() as connection:
-        rows = connection.execute("SELECT key, value_json FROM user_profile").fetchall()
+        rows = connection.execute(
+            """
+            SELECT key, value_json
+            FROM user_profile
+            WHERE session_id = ?
+            """,
+            (session_id,),
+        ).fetchall()
+
     profile: Dict[str, Any] = {}
     for row in rows:
         profile[row["key"]] = json.loads(row["value_json"])

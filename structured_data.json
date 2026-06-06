@@ -1,13 +1,21 @@
 {
   "_fuentes": {
     "contacto_oficial": "https://www.manuelita.com/contacto/",
-    "contacto_oficial_alt": "https://manuelita.com/contacto/"
+    "centro_corporativo": "https://www.manuelita.com/manuelita-oficinas/manuelita-centro-corporativo/",
+    "plataformas_negocio": "https://www.manuelita.com/plataformas-de-negocios/",
+    "sitio_web": "https://www.manuelita.com/"
   },
   "telefono_centro_corporativo": "Manuelita – Centro Corporativo: (602) 889 1444",
   "direccion_centro_corporativo": "Manuelita – Centro Corporativo: Calle 6 #3 - 13, Cali, Colombia",
   "correo_servicio_cliente": "servicliente@manuelita.com",
   "horarios_contacto": "En horas laborales: (602) 3976060 Ext. 1201 o servicliente@manuelita.com. En horario nocturno: celular 316 8329655.",
-  "linea_productos_contacto": "Si tiene inconvenientes con alguno de los productos, en horas laborales comuníquese al (602) 3976060 Ext. 1201 o al correo servicliente@manuelita.com. En horario nocturno, comuníquese al celular 316 8329655.",
+  "contacto_productos_pqrs": "Si tiene inconvenientes con alguno de los productos, en horas laborales comuníquese al (602) 3976060 Ext. 1201 o al correo servicliente@manuelita.com. En horario nocturno, comuníquese al celular 316 8329655.",
+  "productos_o_plataformas": [
+    "Azúcar y energía",
+    "Palma y sus derivados",
+    "Frutas y hortalizas",
+    "Mejillones"
+  ],
   "sedes_colombia": [
     "Centro Corporativo: Calle 6 #3 - 13, Cali, Colombia. Teléfono: (602) 889 1444.",
     "Manuelita Azúcar y Energía: Km 7 vía Palmira - El Cerrito. Teléfono: (602) 890 0878.",
@@ -15,5 +23,30 @@
   ],
   "NIT": "NIT: 891300241",
   "sitio_web": "https://www.manuelita.com/",
-  "canal_contacto": "Formulario de contacto oficial en https://www.manuelita.com/contacto/"
+  "canal_contacto": "Formulario de contacto oficial en https://www.manuelita.com/contacto/",
+  "mision": "Cultivar cosas buenas que generan progreso y bienestar, a través del uso racional y sostenible de los recursos naturales, entregando productos de valor agregado y alta calidad a los mercados que atendemos, siendo fuente de oportunidades para nuestros colaboradores, comunidades y grupos de interés.",
+  "vision": "Ser una organización agroindustrial diversificada, sostenible y rentable, reconocida por la calidad de sus productos y por generar progreso y bienestar en todas las regiones donde opera, manteniéndose fiel a los valores y propósito que han guiado su desarrollo por más de 160 años.",
+  "valores": [
+    "Integridad: actuamos con honestidad, transparencia y coherencia en todo lo que hacemos.",
+    "Compromiso: respondemos con dedicación y responsabilidad ante nuestros grupos de interés.",
+    "Innovación: buscamos permanentemente nuevas formas de mejorar y crecer de manera sostenible.",
+    "Trabajo en equipo: construimos relaciones de confianza y colaboración para alcanzar metas comunes.",
+    "Respeto: valoramos la diversidad y tratamos a todas las personas con dignidad."
+  ],
+  "propósito_superior": "Generar progreso y bienestar a partir del uso racional y sostenible de los recursos naturales.",
+  "año_fundacion": "1864",
+  "fundador": "Santiago Martín Eder",
+  "años_trayectoria": "Más de 161 años de trayectoria (fundada en 1864)",
+  "primer_ingenio": "El primer ingenio azucarero de Manuelita entró en operación en 1901 en el Valle del Cauca.",
+  "sector": "Agroindustrial — sectores de alimentos y energía renovable",
+  "presencia_geografica": "Presencia en varias zonas productivas de las Américas, con operaciones en Colombia, Perú y Brasil.",
+  "mercados_exportacion": "Los productos de Manuelita llegan a más de 65 países en el mundo.",
+  "presidente": "Harold Eder (Presidente de Manuelita S.A.)",
+  "generaciones_familia": "Manuelita ha sido dirigida por siete generaciones de la familia Eder.",
+  "sostenibilidad": "Manuelita publica informes de sostenibilidad anuales. En su informe 2023-2024 reportó un aumento de más del 40% en colaboradores mujeres. Su modelo de negocio se basa en el uso sostenible de recursos naturales y la generación de valor para las comunidades donde opera.",
+  "empleabilidad": "Manuelita impulsa programas de empleabilidad y emprendimiento en sus zonas de influencia, incluyendo la Ruta Emprendedora Manuelita para emprendedores de Palmira y municipios cercanos.",
+  "alianzas_educativas": "Manuelita mantiene alianzas con organizaciones como ALIÓN para transformar la educación en instituciones rurales de Antioquia y otras regiones.",
+  "pagina_empleo": "Las convocatorias de empleo están disponibles en https://www.manuelita.com/trabaja-con-nosotros/",
+  "redes_sociales": "Manuelita tiene presencia en redes sociales. Más información en https://www.manuelita.com/",
+  "todos_los_contactos": "Información de contacto de Manuelita S.A.:\n- Teléfono Centro Corporativo: (602) 889 1444\n- Teléfono Servicio al Cliente: (602) 3976060 Ext. 1201\n- Celular horario nocturno: 316 8329655\n- Correo: servicliente@manuelita.com\n- Dirección: Calle 6 #3 - 13, Cali, Colombia\n- Formulario web: https://www.manuelita.com/contacto/\n- Horario de atención: horas laborales"
 }

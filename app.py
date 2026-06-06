@@ -1,269 +1,371 @@
-"""Aplicación Streamlit del agente conversacional para Manuelita S.A."""
+"""Panel de control operativo — Asistente Virtual Manuelita S.A.
+
+Ejecutar con:
+    uv run streamlit run app.py
+"""
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
+import time
 from typing import Any, Dict, List
 
 import streamlit as st
 
-from agent_service import AgentService
-from chat_memory import ChatMemoryService
-from db import (
-    clear_all_data,
-    delete_chat,
-    initialize_database,
-    list_chats,
-    load_all_settings,
-    rename_chat,
-    save_setting,
-)
+import process_manager as pm
+from db import initialize_database, list_messages, load_all_settings, save_setting
 from env_utils import load_environment
-from langsmith_config import configure_langsmith
 from llm_factory import get_model_catalog
-from settings import APP_ICON, APP_LAYOUT, APP_TITLE, QUESTIONS_FILE
-from ui_components import CUSTOM_CSS, EMPTY_STATE_HTML, HEADER_HTML
+from settings import APP_ICON, APP_TITLE
+from ui_components import (
+    CUSTOM_CSS,
+    HEADER_HTML,
+    SIDEBAR_BRAND_HTML,
+    log_lines_html,
+    msg_bubble_html,
+    status_bar_html,
+)
 
-st.set_page_config(page_title=APP_TITLE, page_icon=APP_ICON, layout=APP_LAYOUT)
+# ── Configuración de página ───────────────────────────────────────────────────
+st.set_page_config(
+    page_title="Panel Operativo — Manuelita S.A.",
+    page_icon=APP_ICON,
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-
-def load_questions() -> List[Dict[str, Any]]:
-    """Carga las preguntas sugeridas desde el archivo JSON."""
-    path = Path(QUESTIONS_FILE)
-    if not path.exists():
-        return []
-    with path.open(encoding="utf-8") as file:
-        data = json.load(file)
-    return data.get("preguntas", [])
-
-
-def initialize_state() -> None:
-    """Inicializa el estado efímero de Streamlit para la sesión actual."""
-    if "current_chat_id" not in st.session_state:
-        st.session_state.current_chat_id = ChatMemoryService.create_new_chat()
-    if "rename_buffer" not in st.session_state:
-        st.session_state.rename_buffer = ""
-    if "selected_model_label" not in st.session_state:
-        st.session_state.selected_model_label = None
-    if "pending_question" not in st.session_state:
-        st.session_state.pending_question = ""
+MAX_MESSAGES_FEED = 120       # mensajes máximos en el feed de conversaciones
 
 
-def render_chat_sidebar(chats: List[Dict[str, Any]]) -> None:
-    """Renderiza el historial de conversaciones y acciones relacionadas."""
+# ── Estado de sesión ──────────────────────────────────────────────────────────
+
+def init_state() -> None:
+    defaults = {
+        "model_catalog":      {},
+        "last_refresh":       0.0,
+        "monitor_running":    False,
+        "selected_session":   None,   # número filtrado en monitoreo
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _service_info() -> Dict[str, Dict]:
+    """Devuelve estado enriquecido de cada servicio para la status bar."""
+    result = {}
+    for key, cfg in pm.SERVICES.items():
+        result[key] = {
+            "label":        cfg["label"],
+            "port":         cfg["port"],
+            "status":       pm.get_status(key),
+            "pid":          pm.get_pid(key),
+            "wa_connected": pm.whatsapp_connected() if key == "bridge" else False,
+        }
+    return result
+
+
+def _all_messages() -> List[Dict[str, Any]]:
+    """Lee todos los mensajes de todas las sesiones ordenados por id."""
+    from db import get_connection
+    with get_connection() as conn:
+        import json
+        rows = conn.execute(
+            """
+            SELECT m.id, m.chat_id, m.role, m.content,
+                   m.route_used, m.model_used, m.tool_used,
+                   m.created_at, m.metadata_json
+            FROM messages m
+            ORDER BY m.id DESC
+            LIMIT ?
+            """,
+            (MAX_MESSAGES_FEED,),
+        ).fetchall()
+    msgs = []
+    for row in rows:
+        item = dict(row)
+        import json
+        item["metadata"] = json.loads(item.pop("metadata_json") or "{}")
+        msgs.append(item)
+    return list(reversed(msgs))
+
+
+def _sessions() -> List[str]:
+    """Lista de session_ids únicos presentes en la DB."""
+    from db import get_connection
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT json_extract(metadata_json, '$.session_id') as sid
+            FROM messages
+            WHERE json_extract(metadata_json, '$.session_id') IS NOT NULL
+            ORDER BY sid
+            """
+        ).fetchall()
+    return [r["sid"] for r in rows if r["sid"]]
+
+
+# ── Sidebar — configuración ───────────────────────────────────────────────────
+
+def render_sidebar() -> None:
     with st.sidebar:
-        st.markdown("### Conversaciones")
-        if st.button("＋ Nuevo chat", use_container_width=True):
-            st.session_state.current_chat_id = ChatMemoryService.create_new_chat()
+        st.markdown(SIDEBAR_BRAND_HTML, unsafe_allow_html=True)
+        st.markdown("---")
+
+        # Catálogo de modelos
+        st.markdown("#### 🤖 Modelo LLM")
+        if st.button("↺ Recargar modelos", use_container_width=True):
+            st.session_state.model_catalog = get_model_catalog()
             st.rerun()
 
-        for chat in chats:
-            col_open, col_delete = st.columns([5, 1])
-            with col_open:
-                if st.button(chat["title"], key=f"open_chat_{chat['id']}", use_container_width=True):
-                    st.session_state.current_chat_id = chat["id"]
-                    st.rerun()
-            with col_delete:
-                if st.button("🗑", key=f"delete_chat_{chat['id']}"):
-                    delete_chat(chat["id"])
-                    if st.session_state.current_chat_id == chat["id"]:
-                        st.session_state.current_chat_id = ChatMemoryService.create_new_chat()
-                    st.rerun()
+        catalog = st.session_state.model_catalog
+        if not catalog:
+            st.caption("Sin modelos disponibles. Verifica Ollama o API keys.")
+        else:
+            st.caption(f"{len(catalog)} modelo(s) disponible(s)")
 
-        st.divider()
-        st.markdown("### Gestión")
-        st.session_state.rename_buffer = st.text_input(
-            "Renombrar chat actual",
-            value=st.session_state.rename_buffer,
-            placeholder="Nuevo título",
+        st.markdown("---")
+
+        # Parámetros
+        st.markdown("#### ⚙️ Parámetros del agente")
+        settings = load_all_settings()
+        available = list(catalog.keys()) if catalog else []
+
+        default_idx = 0
+        if settings.get("default_model") in available:
+            default_idx = available.index(settings["default_model"])
+
+        sel_model = st.selectbox(
+            "Modelo por defecto",
+            available if available else ["(sin modelos)"],
+            index=default_idx,
+            disabled=not available,
         )
-        if st.button("Guardar nuevo título", use_container_width=True):
-            title = st.session_state.rename_buffer.strip()
-            if title:
-                rename_chat(st.session_state.current_chat_id, title)
-                st.session_state.rename_buffer = title
-                st.rerun()
-
-        if st.button("Borrar todo y restablecer", use_container_width=True):
-            clear_all_data()
-            st.session_state.clear()
-            st.rerun()
-
-
-def render_chat_tab(agent: AgentService, model_catalog: Dict[str, Dict[str, str]]) -> None:
-    """Renderiza la vista principal del chat conversacional."""
-    memory_service = agent.memory_service
-    messages = memory_service.get_messages()
-
-    if not messages:
-        st.markdown(EMPTY_STATE_HTML, unsafe_allow_html=True)
-
-    for message in messages:
-        with st.chat_message(message["role"]):
-            if message["role"] == "assistant" and message.get("route_used"):
-                st.markdown(f'<span class="route-chip">{message["route_used"]}</span>', unsafe_allow_html=True)
-            st.markdown(message["content"])
-            if message["role"] == "assistant" and message.get("model_used"):
-                st.caption(f"Modelo: {message['model_used']} · Herramienta: {message.get('tool_used') or 'none'}")
-
-    app_settings = load_all_settings()
-    model_label = st.session_state.selected_model_label or app_settings["default_model"]
-    if model_label not in model_catalog:
-        model_label = next(iter(model_catalog.keys()))
-    st.session_state.selected_model_label = model_label
-
-    prompt = st.chat_input(
-        placeholder="Escribe tu pregunta sobre Manuelita S.A.",
-        max_chars=int(app_settings["question_char_limit"]),
-    )
-    if prompt:
-        model_config = model_catalog[st.session_state.selected_model_label]
-        memory_service.append_user_message(prompt, model_used=model_config["model"])
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
-        with st.chat_message("assistant"):
-            with st.spinner("Procesando consulta..."):
-                result = agent.answer_question(prompt, model_config, app_settings)
-                st.markdown(f'<span class="route-chip">{result["route"]}</span>', unsafe_allow_html=True)
-                st.markdown(result["answer"])
-                st.caption(f"Modelo: {model_config['model']} · Herramienta: {result['tool_used']}")
-        memory_service.append_assistant_message(
-            content=result["answer"],
-            route_used=result["route"],
-            model_used=model_config["model"],
-            tool_used=result["tool_used"],
-            metadata=result["metadata"],
+        temperature    = st.slider("Temperatura",         0.0,  1.5,   float(settings["temperature"]),    0.05)
+        top_p          = st.slider("Top-p",               0.1,  1.0,   float(settings["top_p"]),          0.05)
+        num_predict    = st.slider("Máx. tokens salida",  128,  4096,  int(settings["num_predict"]),      64)
+        rag_k          = st.slider("Fragmentos RAG",      1,    8,     int(settings["rag_k"]),             1)
+        num_ctx        = st.slider("Ventana contexto",    1024, 32768, int(settings["num_ctx"]),           512)
+        repeat_penalty = st.slider("Repeat penalty",      1.0,  2.0,   float(settings["repeat_penalty"]), 0.05)
+        char_limit     = st.number_input(
+            "Límite caracteres/msg", min_value=50, max_value=10000,
+            value=int(settings["question_char_limit"]), step=50,
         )
-        st.rerun()
+        extra_prompt   = st.text_area(
+            "Instrucciones extra del sistema",
+            value=settings.get("system_prompt_extra", ""),
+            height=100,
+        )
 
-
-def render_settings_tab(model_catalog: Dict[str, Dict[str, str]]) -> None:
-    """Renderiza la pestaña de configuración técnica de la aplicación."""
-    settings = load_all_settings()
-    available_models = list(model_catalog.keys())
-    default_index = available_models.index(settings["default_model"]) if settings["default_model"] in available_models else 0
-
-    st.markdown("### Configuración técnica")
-    selected_model = st.selectbox("Modelo por defecto", available_models, index=default_index)
-    temperature = st.slider("Temperatura", 0.0, 1.5, float(settings["temperature"]), 0.05)
-    top_p = st.slider("Top-p", 0.1, 1.0, float(settings["top_p"]), 0.05)
-    num_predict = st.slider("Máx. tokens de salida", 128, 4096, int(settings["num_predict"]), 64)
-    rag_k = st.slider("Fragmentos RAG por consulta", 1, 8, int(settings["rag_k"]), 1)
-    num_ctx = st.slider("Ventana de contexto", 1024, 32768, int(settings["num_ctx"]), 512)
-    repeat_penalty = st.slider("Repeat penalty", 1.0, 2.0, float(settings["repeat_penalty"]), 0.05)
-    question_char_limit = st.number_input(
-        "Límite de caracteres por mensaje",
-        min_value=50,
-        max_value=10000,
-        value=int(settings["question_char_limit"]),
-        step=50,
-    )
-    system_prompt_extra = st.text_area(
-        "Instrucciones adicionales del sistema",
-        value=settings["system_prompt_extra"],
-        height=160,
-    )
-
-    col_save, col_reset = st.columns(2)
-    with col_save:
-        if st.button("Guardar configuración", use_container_width=True):
+        if st.button("💾 Guardar configuración", use_container_width=True, type="primary"):
             payload = {
-                "default_model": selected_model,
-                "temperature": temperature,
-                "top_p": top_p,
-                "num_predict": num_predict,
-                "rag_k": rag_k,
-                "num_ctx": num_ctx,
-                "repeat_penalty": repeat_penalty,
-                "question_char_limit": question_char_limit,
-                "system_prompt_extra": system_prompt_extra,
+                "default_model":      sel_model,
+                "temperature":        temperature,
+                "top_p":              top_p,
+                "num_predict":        num_predict,
+                "rag_k":              rag_k,
+                "num_ctx":            num_ctx,
+                "repeat_penalty":     repeat_penalty,
+                "question_char_limit": char_limit,
+                "system_prompt_extra": extra_prompt,
             }
-            for key, value in payload.items():
-                save_setting(key, value)
-            st.session_state.selected_model_label = selected_model
-            st.success("Configuración guardada correctamente.")
-    with col_reset:
-        if st.button("Restablecer valores", use_container_width=True):
-            clear_all_data()
-            initialize_database()
-            st.session_state.clear()
+            for k, v in payload.items():
+                save_setting(k, v)
+            st.success("✅ Configuración guardada.")
+
+
+# ── Tab: Servicios ────────────────────────────────────────────────────────────
+
+def render_tab_servicios() -> None:
+    st.markdown("### Gestión de servicios")
+
+    for key, cfg in pm.SERVICES.items():
+        status = pm.get_status(key)
+        pid    = pm.get_pid(key)
+        qr     = pm.get_qr(key)
+
+        status_emoji = {"online": "🟢", "starting": "🟡", "error": "🔴", "stopped": "⚫"}.get(status, "⚫")
+        status_label = {"online": "En línea", "starting": "Iniciando...",
+                        "error": "Error", "stopped": "Detenido"}.get(status, status)
+
+        with st.container():
+            st.markdown(f"""
+            <div class="service-card">
+                <h3>{status_emoji} {cfg['label']}</h3>
+                <div class="meta">Puerto {cfg['port']} · {status_label}{f' · PID {pid}' if pid else ''}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            col1, col2, col3, col4 = st.columns([2, 2, 2, 4])
+            with col1:
+                if st.button("▶ Iniciar", key=f"start_{key}", use_container_width=True,
+                             disabled=(status in ("online", "starting"))):
+                    pm.start_service(key)
+                    time.sleep(0.5)
+                    st.rerun()
+            with col2:
+                if st.button("⏹ Detener", key=f"stop_{key}", use_container_width=True,
+                             disabled=(status == "stopped")):
+                    pm.stop_service(key)
+                    st.rerun()
+            with col3:
+                if st.button("↺ Reiniciar", key=f"restart_{key}", use_container_width=True,
+                             disabled=(status == "stopped")):
+                    pm.restart_service(key)
+                    time.sleep(0.5)
+                    st.rerun()
+            with col4:
+                health = pm.health_check(key)
+                if health:
+                    st.success(f"✅ Respondiendo en localhost:{cfg['port']}")
+                elif status != "stopped":
+                    st.warning(f"⏳ Sin respuesta en localhost:{cfg['port']}")
+
+            # QR de WhatsApp
+            if key == "bridge" and qr:
+                st.markdown("""
+                <div class="qr-container">
+                    <h4>📱 Escanea el código QR con WhatsApp</h4>
+                    <p style="color:#6c756d;font-size:0.85rem;margin-bottom:10px;">
+                        Abre WhatsApp → Dispositivos vinculados → Vincular dispositivo
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
+                st.code(qr, language=None)
+                if st.button("✓ Ya escaneé el QR", key="clear_qr"):
+                    pm.clear_qr("bridge")
+                    st.rerun()
+            elif key == "bridge" and status == "online":
+                wa_ok = pm.whatsapp_connected()
+                if wa_ok:
+                    st.success("📱 WhatsApp conectado")
+                else:
+                    st.info("📱 WhatsApp aún no conectado — iniciando sesión...")
+
+            # Logs del servicio
+            with st.expander(f"📋 Logs recientes — {cfg['label']}", expanded=(status == "error")):
+                logs = pm.get_logs(key)
+                if logs:
+                    st.markdown(log_lines_html(logs), unsafe_allow_html=True)
+                else:
+                    st.caption("Sin logs aún.")
+
+        st.markdown("---")
+
+    # Arrancar ambos
+    st.markdown("#### Arranque rápido")
+    col_a, col_b = st.columns(2)
+    with col_a:
+        if st.button("▶▶ Iniciar todos los servicios", use_container_width=True, type="primary"):
+            pm.start_service("agent")
+            time.sleep(1)
+            pm.start_service("bridge")
+            time.sleep(0.5)
+            st.rerun()
+    with col_b:
+        if st.button("⏹⏹ Detener todos", use_container_width=True):
+            pm.stop_service("bridge")
+            pm.stop_service("agent")
             st.rerun()
 
 
-def render_questions_sidebar(questions: List[Dict[str, Any]]) -> None:
-    """Muestra preguntas sugeridas agrupadas por categoría."""
-    with st.sidebar:
-        st.divider()
-        st.markdown("### Preguntas sugeridas")
-        categories: Dict[str, List[str]] = {}
-        for item in questions:
-            category = item.get("categoria", "General")
-            categories.setdefault(category, []).append(item["texto"])
+# ── Tab: Conversaciones ───────────────────────────────────────────────────────
 
-        for category, question_list in categories.items():
-            with st.expander(category, expanded=False):
-                for idx, question in enumerate(question_list):
-                    if st.button(question, key=f"question_{category}_{idx}", use_container_width=True):
-                        st.session_state.pending_question = question
-                        st.rerun()
+def render_tab_conversaciones() -> None:
+    st.markdown("### Monitor de conversaciones en tiempo real")
+
+    # Filtro de sesión — fuera del fragment para no resetear al refrescar
+    sessions = ["Todas las sesiones"] + _sessions()
+    sel = st.selectbox("Filtrar por número / sesión", sessions, key="session_filter")
+    st.session_state.selected_session = None if sel == "Todas las sesiones" else sel
+
+    st.markdown("---")
+
+    # Fragment con auto-refresh cada 5 segundos — solo refresca este bloque
+    @st.fragment(run_every=5)
+    def _feed() -> None:
+        msgs = _all_messages()
+
+        if st.session_state.get("selected_session"):
+            msgs = [m for m in msgs
+                    if m.get("metadata", {}).get("session_id") == st.session_state.selected_session]
+
+        if not msgs:
+            st.info("Sin conversaciones registradas aún. Los mensajes aparecerán aquí cuando WhatsApp esté activo.")
+            return
+
+        current_session = None
+        html_parts = ['<div class="conv-feed">']
+        for msg in msgs:
+            sid = msg.get("metadata", {}).get("session_id", "desconocido")
+            if sid != current_session:
+                current_session = sid
+                html_parts.append(f'<div class="session-pill">📱 Sesión: {sid}</div>')
+            html_parts.append(msg_bubble_html(msg))
+        html_parts.append("</div>")
+        st.markdown("".join(html_parts), unsafe_allow_html=True)
+
+        st.markdown("---")
+        total_users = len([m for m in msgs if m["role"] == "user"])
+        total_agent = len([m for m in msgs if m["role"] == "assistant"])
+        sessions_count = len(set(
+            m.get("metadata", {}).get("session_id", "") for m in msgs
+        ))
+        routes = [m.get("route_used") for m in msgs if m.get("route_used")]
+
+        mc1, mc2, mc3, mc4 = st.columns(4)
+        mc1.metric("Mensajes usuario", total_users)
+        mc2.metric("Respuestas agente", total_agent)
+        mc3.metric("Sesiones activas", sessions_count)
+        mc4.metric("Interacciones totales", total_users + total_agent)
+
+        if routes:
+            from collections import Counter
+            route_counts = Counter(routes)
+            st.markdown("**Distribución de rutas:**")
+            cols = st.columns(len(route_counts))
+            for i, (route, count) in enumerate(route_counts.most_common()):
+                cols[i].metric(route, count)
+
+    _feed()
 
 
-def process_pending_question(agent: AgentService, model_catalog: Dict[str, Dict[str, str]]) -> None:
-    """Procesa una pregunta sugerida seleccionada desde la barra lateral."""
-    prompt = st.session_state.get("pending_question")
-    if not prompt:
-        return
-
-    app_settings = load_all_settings()
-    model_label = st.session_state.selected_model_label or app_settings["default_model"]
-    if model_label not in model_catalog:
-        model_label = next(iter(model_catalog.keys()))
-    model_config = model_catalog[model_label]
-
-    agent.memory_service.append_user_message(prompt, model_used=model_config["model"])
-    result = agent.answer_question(prompt, model_config, app_settings)
-    agent.memory_service.append_assistant_message(
-        content=result["answer"],
-        route_used=result["route"],
-        model_used=model_config["model"],
-        tool_used=result["tool_used"],
-        metadata=result["metadata"],
-    )
-    st.session_state.pending_question = ""
-    st.rerun()
-
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    """Punto de entrada principal de la aplicación."""
     load_environment()
-    configure_langsmith()
     initialize_database()
-    initialize_state()
+    init_state()
 
+    # Cargar catálogo una vez por sesión
+    if not st.session_state.model_catalog:
+        st.session_state.model_catalog = get_model_catalog()
+
+    # CSS global
     st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+    # Header
     st.markdown(HEADER_HTML, unsafe_allow_html=True)
 
-    model_catalog = get_model_catalog()
-    if not model_catalog:
-        st.error("No hay modelos disponibles. Verifica Ollama o la configuración API.")
-        st.stop()
+    # Status bar superior
+    svc_info = _service_info()
+    st.markdown(status_bar_html(svc_info), unsafe_allow_html=True)
 
-    questions = load_questions()
-    chats = list_chats()
-    render_chat_sidebar(chats)
+    # Sidebar
+    render_sidebar()
 
-    memory_service = ChatMemoryService(st.session_state.current_chat_id)
-    agent = AgentService(memory_service)
-    render_questions_sidebar(questions)
-    process_pending_question(agent, model_catalog)
+    # Tabs principales
+    tab_svc, tab_conv = st.tabs([
+        "🖥️  Servicios",
+        "💬  Conversaciones",
+    ])
 
-    chat_tab, settings_tab = st.tabs(["Chat", "Configuración"])
-    with chat_tab:
-        render_chat_tab(agent, model_catalog)
-    with settings_tab:
-        render_settings_tab(model_catalog)
+    with tab_svc:
+        render_tab_servicios()
+
+    with tab_conv:
+        render_tab_conversaciones()
 
 
 if __name__ == "__main__":

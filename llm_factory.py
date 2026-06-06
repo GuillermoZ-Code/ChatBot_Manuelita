@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Any, Dict, List
 
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_ollama import ChatOllama
-from langchain_openai import ChatOpenAI
 import ollama
+from langchain.chat_models import init_chat_model
 
-from env_utils import read_env
 from settings import FREE_API_MODELS
 
 
@@ -31,7 +28,7 @@ def get_model_catalog() -> Dict[str, Dict[str, str]]:
     catalog: Dict[str, Dict[str, str]] = {}
 
     for label, model_name in FREE_API_MODELS.items():
-        provider = "google" if model_name.startswith("gemini") else "openai"
+        provider = "google_genai" if model_name.startswith("gemini") else "openai"
         catalog[label] = {"provider": provider, "model": model_name}
 
     for model_name in get_ollama_models():
@@ -39,48 +36,31 @@ def get_model_catalog() -> Dict[str, Dict[str, str]]:
             "provider": "ollama",
             "model": model_name,
         }
+
     return catalog
 
 
-def build_llm(model_config: Dict[str, str], settings: Dict[str, float]):
-    """Instancia un LLM de LangChain según el proveedor seleccionado."""
+def build_llm(model_config: Dict[str, str], settings: Dict[str, Any]):
+    """Instancia un LLM de LangChain según el proveedor seleccionado usando init_chat_model."""
     provider = model_config["provider"]
     model_name = model_config["model"]
 
-    if provider == "google":
-        api_key = read_env("GEMINI_API_KEY")
-        if not api_key:
-            raise ValueError(
-                "Falta GEMINI_API_KEY en el archivo .env."
-            )
-        return ChatGoogleGenerativeAI(
-            model=model_name,
-            google_api_key=api_key,
-            temperature=settings["temperature"],
-            top_p=settings["top_p"],
-            max_output_tokens=settings["num_predict"],
-        )
+    kwargs: Dict[str, Any] = {
+        "temperature": settings["temperature"],
+        "top_p": settings["top_p"],
+    }
 
-    if provider == "openai":
-        api_key = read_env("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError("Falta OPENAI_API_KEY en el archivo .env.")
-        return ChatOpenAI(
-            model=model_name,
-            api_key=api_key,
-            temperature=settings["temperature"],
-            top_p=settings["top_p"],
-            max_tokens=settings["num_predict"],
-        )
+    if provider == "google_genai":
+        kwargs["max_output_tokens"] = settings["num_predict"]
+    elif provider == "openai":
+        kwargs["max_tokens"] = settings["num_predict"]
+    elif provider == "ollama":
+        kwargs["num_predict"] = settings["num_predict"]
+        kwargs["repeat_penalty"] = settings["repeat_penalty"]
+        kwargs["num_ctx"] = settings["num_ctx"]
 
-    if provider == "ollama":
-        return ChatOllama(
-            model=model_name,
-            temperature=settings["temperature"],
-            top_p=settings["top_p"],
-            num_predict=settings["num_predict"],
-            repeat_penalty=settings["repeat_penalty"],
-            num_ctx=settings["num_ctx"],
-        )
-
-    raise ValueError(f"Proveedor no soportado: {provider}")
+    return init_chat_model(
+        model=model_name,
+        model_provider=provider,
+        **kwargs,
+    )
